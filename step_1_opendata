@@ -1,0 +1,27 @@
+function [S25, S35, S45] = opendata()
+% import file as variables
+    S25 = import_file('Project 100\S3run25markers.txt');
+    S35 = import_file('Project 100\S3run35markers.txt');
+    S45 = import_file('Project 100\S3run45markers.txt');
+end
+
+function out = import_file(filename)
+    mydata = fopen(filename,'rt');
+    if mydata < 0
+        error('Cannot open file: %s', filename); % check for opening file
+    end
+
+    header = fgetl(mydata);                 % read header line
+    raw = fread(mydata, Inf, '*char')';     % read rest of file
+    fclose(mydata);                         % close file
+
+    headers = strsplit(header, ',');        % read header titles
+    M = numel(headers);                     % count headers
+
+    nums = sscanf(strrep(raw, ',', ' '), '%f'); % replace , between datas to space, detect float numbers for datas
+    N = floor(numel(nums) / M);             % number of rows
+
+    out.data = reshape(nums(1:N*M), M, []).';   % push the data to a struct
+    out.colheaders = headers;
+    out.textdata = headers;
+end
