@@ -1,0 +1,62 @@
+function [S25, S35, S45, strides25, strides35, strides45] = main()
+% import file as variables
+    
+    folderName = input('Enter folder name(S1, S2, S3): ', 's');
+    folderPath = fullfile(pwd, folderName);  % combine current path with folder name
+
+    % Check if folder exists
+    if ~isfolder(folderPath)
+        error('Folder "%s" not found in current directory.', folderName);
+    end
+    
+    % Names of the files you expect in that folder
+    file25 = fullfile(folderPath, [folderName 'run25markers.txt']);
+    file35 = fullfile(folderPath, [folderName 'run35markers.txt']);
+    file45 = fullfile(folderPath, [folderName 'run45markers.txt']);
+    
+    % Load using your import_file function
+    S25 = import_file(file25);
+    S35 = import_file(file35);
+    S45 = import_file(file45);
+
+    % Run step 3 to detect strides
+    strides25 = step_3(S25);
+    strides35 = step_3(S35);
+    strides45 = step_3(S45);
+    
+end
+
+function out = import_file(filename)
+    % Open file using low-level I/O
+    mydata = fopen(filename,'rt');
+    if mydata < 0
+        error('Cannot open file: %s', filename);
+    end
+    
+    header = fgetl(mydata);
+    raw = fread(mydata, Inf, '*char')';
+    fclose(mydata);
+    
+    headers = strsplit(header, ',');
+    M = numel(headers);
+    
+    nums = sscanf(strrep(raw, ',', ' '), '%f');
+    N = floor(numel(nums) / M);
+    
+    out.data = reshape(nums(1:N*M), M, []).';
+    out.colheaders = headers;
+    out.textdata = headers;
+end
+
+function strides = step_3(filename)
+    column = find(strcmp(filename.textdata, 'R.Heel.BottomY'), 1); % find the column for Heel Contact
+    time = filename.data(:,1);
+    RHeelY = filename.data(:,column);                              % store Heel Contact data in RHeelY
+    
+    strides = [];
+    for i = 2:(length(RHeelY)-1)
+        if RHeelY(i)<RHeelY(i-1) && RHeelY(i)<RHeelY(i+1)          % check if a point is a conact or not
+            strides(end+1) = time(i);                              % store times of contact as strides
+        end
+    end
+end
