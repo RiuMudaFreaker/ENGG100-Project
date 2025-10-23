@@ -1,0 +1,1 @@
+[S25, S35, S45, strides25, strides35, strides45] = main();
