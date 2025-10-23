@@ -1,0 +1,112 @@
+function [strides25, strides35, strides45, d25, L25, v25, d35, L35, v35, d45, L45, v45 ] = main()
+% import file as variables
+
+    folderName = input('Enter folder name (S1, S2, S3): ', 's');
+    folderPath = fullfile(pwd, folderName);
+    if ~isfolder(folderPath)
+        error('Folder "%s" not found in current directory.', folderName);
+    end
+
+    % Build file paths from the chosen folder
+    file25 = fullfile(folderPath, [folderName 'run25markers.txt']);
+    file35 = fullfile(folderPath, [folderName 'run35markers.txt']);
+    file45 = fullfile(folderPath, [folderName 'run45markers.txt']);
+
+    % Load (low-level I/O import)
+    S25 = import_file(file25);
+    S35 = import_file(file35);
+    S45 = import_file(file45);
+
+    % Step 3: detect contacts (each stride row = full row at contact)
+    strides25 = step_3(S25);
+    strides35 = step_3(S35);
+    strides45 = step_3(S45);
+
+    % Step 4: durations, lengths, average speeds (computed, not returned)
+    [d25, L25, v25] = step_4(S25, strides25);
+    [d35, L35, v35] = step_4(S35, strides35);
+    [d45, L45, v45] = step_4(S45, strides45);
+    
+end
+
+function out = import_file(filename)
+    % Open file using low-level I/O
+    mydata = fopen(filename,'rt');
+    if mydata < 0
+        error('Cannot open file: %s', filename);
+    end
+    
+    header = fgetl(mydata);
+    raw = fread(mydata, Inf, '*char')';
+    fclose(mydata);
+    
+    headers = strsplit(header, ',');
+    M = numel(headers);
+    
+    nums = sscanf(strrep(raw, ',', ' '), '%f');
+    N = floor(numel(nums) / M);
+    
+    out.data = reshape(nums(1:N*M), M, []).';
+    out.colheaders = headers;
+    out.textdata = headers;
+end
+
+function strides = step_3(filename)
+    column = find(strcmp(filename.textdata, 'R.Heel.BottomY'), 1); % find the column for Heel Contact
+    RHeelY = filename.data(:,column);                              % store Heel Contact data in RHeelY
+    
+    strides = struct('data', [], 'textdata', {filename.textdata});
+
+    for i = 2:(length(RHeelY)-1)
+        if RHeelY(i)<RHeelY(i-1) && RHeelY(i)<RHeelY(i+1)          % check if a point is a contact or not
+            strides.data(end+1,:) = filename.data(i,:);            % store a line as strides
+        end
+    end
+end
+
+function [s_duration, s_length, s_avgspeed] = step_4(filename, strides)
+    
+    % Add a variable to be strides time
+    s_time_column = find(strcmp(strides.textdata, 'Time'), 1);
+    STime = strides.data(:,s_time_column);
+     
+    s_duration  = [];
+    
+    % Calculate strides length
+    for i = 2:length(STime)
+            s_duration(end+1) = STime(i) - STime(i-1);
+    end
+    
+    % Add a variable to be X axis degree of data
+    RHeelX_column = find(strcmp(filename.textdata, 'R.Heel.BottomX'), 1);
+    RHeelX = filename.data(:, RHeelX_column);
+    
+    % Define stride start and end points
+    s_start = [];
+    s_end = strides.data(:,RHeelX_column);
+    s_length = [];
+    
+    % Find stride start point
+    for i = 2:(length(RHeelX)-1)
+        if RHeelX(i)<RHeelX(i-1) && RHeelX(i)<RHeelX(i+1)         
+            s_start(end+1) = filename.data(i, RHeelX_column);
+        end
+    end
+    
+    % Calculate stride length
+    maxPairs = min(length(s_end)-1, length(s_start));
+    s_length = [];
+    for i = 2:(maxPairs+1)
+        s_length(end+1,1) = abs(s_end(i) - s_start(i-1));
+    end
+
+    % Calculate stride average speed
+    maxN = min(length(s_length), length(s_duration));
+    s_length   = s_length(1:maxN);
+    s_duration = s_duration(1:maxN);
+
+    s_avgspeed = [];
+    for i = 1:maxN
+        s_avgspeed(end+1,1) = s_length(i) / s_duration(i);
+    end
+end
