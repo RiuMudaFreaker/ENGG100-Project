@@ -1,0 +1,214 @@
+function [S25, S35, S45, strides25, strides35, strides45, d25, L25, v25, d35, L35, v35, d45, L45, v45, pelvisPos25, pelvisPos35, pelvisPos45, footPos25, footPos35, footPos45 ] = main()
+    % import file as variables
+
+    folderName = input('Enter folder name (S1, S2, S3): ', 's');
+    folderPath = fullfile(pwd, folderName);
+    if ~isfolder(folderPath)
+        error('Folder "%s" not found in current directory.', folderName);
+    end
+
+    % Build file paths from the chosen folder
+    file25 = fullfile(folderPath, [folderName 'run25markers.txt']);
+    file35 = fullfile(folderPath, [folderName 'run35markers.txt']);
+    file45 = fullfile(folderPath, [folderName 'run45markers.txt']);
+
+    % Load (low-level I/O import)
+    S25 = import_file(file25);
+    S35 = import_file(file35);
+    S45 = import_file(file45);
+
+    % Step 3: detect contacts (each stride row = full row at contact)
+    strides25 = step_3(S25);
+    strides35 = step_3(S35);
+    strides45 = step_3(S45);
+
+    % Step 4: durations, lengths, average speeds
+    [d25, L25, v25] = step_4(strides25, 2.5);
+    [d35, L35, v35] = step_4(strides35, 3.5);
+    [d45, L45, v45] = step_4(strides45, 4.5);
+
+    % Step 5: Pelvis Position
+    pelvisPos25 = step_5(strides25);
+    pelvisPos35 = step_5(strides35);
+    pelvisPos45 = step_5(strides45);
+
+    % Step 6: Foot Position
+    footPos25 = step_6(S25);
+    footPos35 = step_6(S35);
+    footPos45 = step_6(S45);
+    
+end
+
+function out = import_file(filename)
+    % Open file using low-level I/O
+    mydata = fopen(filename,'rt');
+    if mydata < 0
+        error('Cannot open file: %s', filename);
+    end
+    
+    header = fgetl(mydata);
+    raw = fread(mydata, Inf, '*char')';
+    fclose(mydata);
+    
+    headers = strsplit(header, ',');
+    M = numel(headers);
+    
+    nums = sscanf(strrep(raw, ',', ' '), '%f');
+    N = floor(numel(nums) / M);
+    
+    out.data = reshape(nums(1:N*M), M, []).';
+
+    out.data(:, 2:end) = out.data(:, 2:end) * 0.001;
+    out.colheaders = headers;
+    out.textdata = headers;
+end
+
+function strides = step_3(filename)
+    column = find(strcmp(filename.textdata, 'R.Heel.BottomY'), 1); % find the column for Heel Contact
+    RHeelY = filename.data(:,column);                              % store Heel Contact data in RHeelY
+    
+    strides = struct('data', [], 'textdata', {filename.textdata});
+
+    for i = 2:(length(RHeelY)-1)
+        if RHeelY(i)<RHeelY(i-1) && RHeelY(i)<RHeelY(i+1)          % check if a point is a contact or not
+            strides.data(end+1,:) = filename.data(i,:);            % store a line as strides
+        end
+    end
+end
+
+function [s_duration, s_length, s_avgspeed] = step_4(strides, speed)
+    
+    % Add a variable to be strides time
+    s_time_column = find(strcmp(strides.textdata, 'Time'), 2);
+    STime = strides.data(:,s_time_column);
+     
+    s_duration  = [];
+    
+    % Calculate strides length
+    for i = 2:length(STime)
+            s_duration(end+1) = STime(i) - STime(i-1);
+    end
+    
+    % Add a variable to be X axis degree of data
+    RHeelX_column = find(strcmp(strides.textdata, 'R.Heel.BottomX'), 1);
+    RHeelX = strides.data(:, RHeelX_column);
+    
+    % Define stride contact positions
+    s_position = strides.data(:,RHeelX_column);
+    s_length = [];
+    
+    
+    % Calculate stride length
+    for i = 2:length(RHeelX)
+            s_length(end+1) = s_position(i) - s_position(i-1) + speed*(s_duration(i-1));
+    end
+    
+    s_avgspeed = [];
+    % Calculate stride average speed
+    for i = 1:length(s_length)
+        s_avgspeed(end+1) = s_length(i) ./ s_duration(i);
+    end
+end
+
+function pelvis_pos = step_5(strides)
+
+    % Initialize pelvis structure
+    pelvis_pos = struct('data', [], 'textdata', []);
+    pelvis_pos.textdata = {'Time', 'PelX', 'PelY', 'PelZ'};
+    
+    % Get Time column
+    T_column = find(strcmp(strides.textdata, 'Time'), 1);
+    for i = 1:size(strides.data, 1)
+        pelvis_pos.data(i, 1) = strides.data(i, T_column);
+    end
+
+    % Pelvis X
+    x_pos = {'R.ASISX', 'L.ASISX', 'R.PSISX', 'L.PSISX'};
+    x_columns = find(ismember(strides.textdata, x_pos));
+    for i = 1:size(strides.data, 1)
+        pelvis_pos.data(i, 2) = mean(strides.data(i, x_columns), 2);
+    end
+
+    % Pelvis Y
+    y_pos = {'R.ASISY', 'L.ASISY', 'R.PSISY', 'L.PSISY'};
+    y_columns = find(ismember(strides.textdata, y_pos));
+    for i = 1:size(strides.data, 1)
+        pelvis_pos.data(i, 3) = mean(strides.data(i, y_columns), 2);
+    end
+
+    % Pelvis Z
+    z_pos = {'R.ASISZ', 'L.ASISZ', 'R.PSISZ', 'L.PSISZ'};
+    z_columns = find(ismember(strides.textdata, z_pos));
+    for i = 1:size(strides.data, 1)
+        pelvis_pos.data(i, 4) = mean(strides.data(i, z_columns), 2);
+    end
+    
+end
+
+function foot_pos = step_6(filename)
+
+    % Initialize pelvis structure
+    foot_pos = struct('data', [], 'textdata', []);
+    foot_pos.textdata = {'Time', 'RFootX', 'RFootY', 'RFootZ', 'LFootX', 'LFootY', 'LFootZ'};
+    
+    % Get Time column
+    T_column = find(strcmp(filename.textdata, 'Time'), 1);
+    for i = 1:size(filename.data, 1)
+       foot_pos.data(i, 1) = filename.data(i, T_column);
+    end
+
+    % Right Foot X
+    rheelx_pos = {'R.Heel.TopX', 'R.Heel.BottomX', 'R.Heel.LateralX'};
+    rheelx_columns = find(ismember(filename.textdata, rheelx_pos));
+    rtoex_pos = {'R.MT1X', 'R.MT5X'}; 
+    rtoex_columns = find(ismember(filename.textdata, rtoex_pos));
+    for i = 1:size(filename.data, 1)
+        foot_pos.data(i, 2) =  0.5 * (mean(filename.data(i, rtoex_columns), 2) + mean(filename.data(i, rheelx_columns), 2));
+    end
+
+    % Right Foot Y
+    rheely_pos = {'R.Heel.TopY', 'R.Heel.BottomY', 'R.Heel.LateralY'};
+    rheely_columns = find(ismember(filename.textdata, rheely_pos));
+    rtoey_pos = {'R.MT1Y', 'R.MT5Y'}; 
+    rtoey_columns = find(ismember(filename.textdata, rtoey_pos));
+    for i = 1:size(filename.data, 1)
+        foot_pos.data(i, 3) =  0.5 * (mean(filename.data(i, rtoey_columns), 2) + mean(filename.data(i, rheely_columns), 2));
+    end
+
+    % Right Foot Z
+    rheelz_pos = {'R.Heel.TopZ', 'R.Heel.BottomZ', 'R.Heel.LateralZ'};
+    rheelz_columns = find(ismember(filename.textdata, rheelz_pos));
+    rtoez_pos = {'R.MT1Z', 'R.MT5Z'}; 
+    rtoez_columns = find(ismember(filename.textdata, rtoez_pos));
+    for i = 1:size(filename.data, 1)
+        foot_pos.data(i, 4) =  0.5 * (mean(filename.data(i, rtoez_columns), 2) + mean(filename.data(i, rheelz_columns), 2));
+    end
+    
+    % Left Foot X
+    lheelx_pos = {'L.Heel.TopX', 'L.Heel.BottomX', 'L.Heel.LateralX'};
+    lheelx_columns = find(ismember(filename.textdata, lheelx_pos));
+    ltoex_pos = {'L.MT1X', 'L.MT5X'}; 
+    ltoex_columns = find(ismember(filename.textdata, ltoex_pos));
+    for i = 1:size(filename.data, 1)
+        foot_pos.data(i, 5) =  0.5 * (mean(filename.data(i, ltoex_columns), 2) + mean(filename.data(i, lheelx_columns), 2));
+    end
+
+    % Left Foot Y
+    lheely_pos = {'L.Heel_TopY', 'L.Heel.BottomY', 'L.Heel.LateralY'};
+    lheely_columns = find(ismember(filename.textdata, lheely_pos));
+    ltoey_pos = {'L.MT1Y', 'L.MT5Y'}; 
+    ltoey_columns = find(ismember(filename.textdata, ltoey_pos));
+    for i = 1:size(filename.data, 1)
+        foot_pos.data(i, 6) =  0.5 * (mean(filename.data(i, ltoey_columns), 2) + mean(filename.data(i, lheely_columns), 2));
+    end
+
+    % Left Foot Z
+    lheelz_pos = {'L.Heel.TopZ', 'L.Heel.BottomZ', 'L.Heel.LateralZ'};
+    lheelz_columns = find(ismember(filename.textdata, lheelz_pos));
+    ltoez_pos = {'L.MT1Z', 'L.MT5Z'}; 
+    ltoez_columns = find(ismember(filename.textdata, ltoez_pos));
+    for i = 1:size(filename.data, 1)
+        foot_pos.data(i, 7) =  0.5 * (mean(filename.data(i, ltoez_columns), 2) + mean(filename.data(i, lheelz_columns), 2));
+    end
+
+end
