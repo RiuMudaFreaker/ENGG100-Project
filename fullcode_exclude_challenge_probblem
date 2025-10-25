@@ -1,0 +1,366 @@
+% Main Function to keep all the steps in order and push out outputs needed
+% Assembled and Finalised by Khanh An Nguyen
+function [S25, S35, S45, strides25, strides35, strides45, d25, L25, v25, d35, L35, v35, d45, L45, v45, pelvisPos25, pelvisPos35, pelvisPos45, footPos25, footPos35, footPos45 ] = main()
+    
+    % Import file as variables
+    folderName = input('Enter folder name (S1, S2, S3): ', 's');            % Prompt user to enter a dataset folder
+    folderPath = fullfile(pwd, folderName);                                 % Find user drive path to that dataset folder
+    if ~isfolder(folderPath)                                                % Check if that folder exists or not
+        error('Folder "%s" not found in current directory.', folderName);
+    end
+
+    % Build file paths from the chosen folder
+    file25 = fullfile(folderPath, [folderName 'run25markers.txt']);         % Mark variables as the dataset file for further analysis
+    file35 = fullfile(folderPath, [folderName 'run35markers.txt']);
+    file45 = fullfile(folderPath, [folderName 'run45markers.txt']);
+
+    % Step 2: Store the dataset as seconds, meters and meters per second
+    S25 = import_file(file25);                                              % Call import_file 3 times to repeat step 1 and 2 for all 3 datasets
+    S35 = import_file(file35);
+    S45 = import_file(file45);
+
+    % Step 3: Detect contacts (each stride = full data's row at contact)
+    strides25 = step_3(S25);                                                % Call step_3 function to detect strides for each dataset
+    strides35 = step_3(S35);
+    strides45 = step_3(S45);
+
+    % Step 4: Durations, Lengths, Average Speeds of Strides
+    [d25, L25, v25] = step_4(strides25, 2.5);                               % Call step_4 function to calculate output values
+    [d35, L35, v35] = step_4(strides35, 3.5);
+    [d45, L45, v45] = step_4(strides45, 4.5);
+
+    % Step 5: Pelvis Position for Strides
+    pelvisPos25 = step_5(strides25);                                        % Call step_5 function to calculate pelvis positions between strides
+    pelvisPos35 = step_5(strides35);
+    pelvisPos45 = step_5(strides45);
+
+    % Step 6: Foot Position
+    footPos25 = step_6(S25);                                                % Call step_6 function to calculate foot positions throughout the dataset
+    footPos35 = step_6(S35);
+    footPos45 = step_6(S45);
+    
+    % Step 7: Plots
+    % Call step_7 function to generate required plots
+    step_7({strides25, strides35, strides45}, {d25, d35, d45}, {L25, L35, L45}, {v25, v35, v45}, {pelvisPos25, pelvisPos35, pelvisPos45}, {footPos25, footPos35, footPos45}, {'2.5 m/s', '3.5 m/s', '4.5 m/s'});
+
+end
+
+% Step 2: Store the data into Matlab - Coded by Khanh An Nguyen
+% Storing the data in seconds, meters and meters per second
+function out = import_file(filename)
+    
+    % Open file using low-level I/O
+    mydata = fopen(filename,'rt');                                          % Open the data file with the given name
+    if mydata < 0
+        error('Cannot open file: %s', filename);
+    end
+    
+    header = fgetl(mydata);                                                 % Read the first line and store as a header line
+    raw = fread(mydata, Inf, '*char')';                                     % Read the lest of the dataset file
+    fclose(mydata);                                                         % Close the file to prevent any overload failure
+    
+    headers = strsplit(header, ',');                                        % Convert the header line into columns of header
+    M = numel(headers);                                                     % Store the number of data columns
+    
+    nums = sscanf(strrep(raw, ',', ' '), '%f');                             % Convert raw data into lists of numeric values
+    N = floor(numel(nums) / M);                                             % Store the number of data rows
+    
+    out.data = reshape(nums(1:N*M), M, []).';                               % Make 'data' field in the 'out' output to a matrix of exact size needed
+                                                                            % and store all the numeric data in that matrix
+
+    out.data(:, 2:end) = out.data(:, 2:end) * 0.001;                        % Convert all positions row from milimeters to meters
+    out.colheaders = headers;                                               % Store the row headers
+    out.textdata = headers;                                                 % Store the column headers
+end
+
+% Step 3: Detect Strides using Right Heel Marker - Coded by Hamad Aftab
+function strides = step_3(filename)
+    
+    % Identify local minima in the right-heel vertical trajectory
+    % A local minimum ≈ heel-strike (stride start)
+    
+    % Extract heel-marker column
+    column = find(strcmp(filename.textdata, 'R.Heel.BottomY'), 1);          % find the column for Heel Contact
+    RHeelY = filename.data(:,column);                                       % store Heel Contact data in RHeelY
+    
+    % Detect local minimal manually
+    strides = struct('data', [], 'textdata', {filename.textdata});          % add variable 'strides' as a struct to store all datas
+
+    for i = 2:(length(RHeelY)-1)
+        if RHeelY(i)<RHeelY(i-1) && RHeelY(i)<RHeelY(i+1)                   % check if a point is a contact or not
+            strides.data(end+1,:) = filename.data(i,:);                     % store a line as strides
+        end
+    end
+end
+
+% Step 4: Calculate stride duration, length and average speed
+% Coded by Tom Vickery and William Green
+function [s_duration, s_length, s_avgspeed] = step_4(strides, speed)
+    
+    % Add a variable to be strides time
+    s_time_column = find(strcmp(strides.textdata, 'Time'), 2);              % Find the column with title 'Time
+    STime = strides.data(:,s_time_column);                                  % Store that column under a variable
+     
+    s_duration  = [];                                                       % Make an empty matrix to store the stride duration
+    
+    % Calculate strides duration
+    for i = 2:length(STime)                                                 % Repeat the following step from 2nd stride onwards
+        s_duration(end+1) = STime(i) - STime(i-1);                          % Stride Duration = Latter Stride Detected Time - Former Stride Detected Time
+    end
+    
+    % Add a variable to be X axis degree of heel position
+    RHeelX_column = find(strcmp(strides.textdata, 'R.Heel.BottomX'), 1);    % Same as above
+    RHeelX = strides.data(:, RHeelX_column);
+    
+    % Define stride contact positions
+    s_position = strides.data(:,RHeelX_column);                             % Store all the detected stride heel position
+    s_length = [];                                                          % Make an empty matrix to store the stride length    
+    
+    % Calculate stride length
+    for i = 2:length(RHeelX)                                                % Same as above
+        % Stride Length = Distance between 2 strides contact + Treadmill Velocity * Stride Duration    
+        s_length(end+1) = s_position(i) - s_position(i-1) + speed*(s_duration(i-1));
+    end
+    
+    s_avgspeed = [];                                                        % Same as above
+
+    % Calculate stride average speed
+    for i = 1:length(s_length)                                              % Repeat the following step for every length and duration of strides found
+        s_avgspeed(end+1) = s_length(i) ./ s_duration(i);                   % Stride Speed = Stride Length / Stride Duration
+    end
+end
+
+% Step 5: Calculate Pelvis positions over time - Coded by Khanh An Nguyen
+function pelvis_pos = step_5(strides)
+
+    % Initialize pelvis structure
+    pelvis_pos = struct('data', [], 'textdata', []);                        % Make a struct to store all the Pelvis Position Values
+    pelvis_pos.textdata = {'Time', 'PelX', 'PelY', 'PelZ'};                 % Label the columns
+    
+    % Get Time column
+    T_column = find(strcmp(strides.textdata, 'Time'), 1);                   % Same as Step 4
+    for i = 1:size(strides.data, 1)
+        pelvis_pos.data(i, 1) = strides.data(i, T_column);                  % Store the Time column
+    end
+
+    % Pelvis X
+    x_pos = {'R.ASISX', 'L.ASISX', 'R.PSISX', 'L.PSISX'};                   % Define the needed columns label for X axis degree of pelvis position
+    x_columns = find(ismember(strides.textdata, x_pos));                    % Find columns
+    for i = 1:size(strides.data, 1)
+        pelvis_pos.data(i, 2) = mean(strides.data(i, x_columns), 2);        % Store the data under Pelvis X postion as the mean of the 4 pelvis position
+    end
+    
+    % Repeat the Pelvis X procedure for 2 axis Y and Z
+
+    % Pelvis Y
+    y_pos = {'R.ASISY', 'L.ASISY', 'R.PSISY', 'L.PSISY'};
+    y_columns = find(ismember(strides.textdata, y_pos));
+    for i = 1:size(strides.data, 1)
+        pelvis_pos.data(i, 3) = mean(strides.data(i, y_columns), 2);
+    end
+
+    % Pelvis Z
+    z_pos = {'R.ASISZ', 'L.ASISZ', 'R.PSISZ', 'L.PSISZ'};
+    z_columns = find(ismember(strides.textdata, z_pos));
+    for i = 1:size(strides.data, 1)
+        pelvis_pos.data(i, 4) = mean(strides.data(i, z_columns), 2);
+    end
+    
+end
+
+% Step 6: Calculate Foot Positions - Coded by Mohammed Fares
+function foot_pos = step_6(filename)
+
+    % Initialize pelvis structure
+    foot_pos = struct('data', [], 'textdata', []);                          % Same as step 5
+    foot_pos.textdata = {'Time', 'RFootX', 'RFootY', 'RFootZ', 'LFootX', 'LFootY', 'LFootZ'};
+    
+    % Get Time column
+    T_column = find(strcmp(filename.textdata, 'Time'), 1);                  % Same as step 4
+    for i = 1:size(filename.data, 1)
+       foot_pos.data(i, 1) = filename.data(i, T_column);
+    end
+
+    % Right Foot X
+    rheelx_pos = {'R.Heel.TopX', 'R.Heel.BottomX', 'R.Heel.LateralX'};      % Define the needed columns for X axis degree of right heel position
+    rheelx_columns = find(ismember(filename.textdata, rheelx_pos));         % Find columns
+    rtoex_pos = {'R.MT1X', 'R.MT5X'};                                       % Define the needed columns for X axis degree of right toe postion
+    rtoex_columns = find(ismember(filename.textdata, rtoex_pos));           % Find columns
+    for i = 1:size(filename.data, 1)                                        % repeat the procedure for every data row
+        % Foot Mean Postion = ( Mean of Toe Postion + Mean of Heel Postion ) / 2
+        % Store the output under the column for Right Foot X axis
+        foot_pos.data(i, 2) =  0.5 * (mean(filename.data(i, rtoex_columns), 2) + mean(filename.data(i, rheelx_columns), 2));
+    end
+    
+    % Repeat the Right Foot X procedure for both feet and on 3 axis X, Y and Z
+
+    % Right Foot Y
+    rheely_pos = {'R.Heel.TopY', 'R.Heel.BottomY', 'R.Heel.LateralY'};
+    rheely_columns = find(ismember(filename.textdata, rheely_pos));
+    rtoey_pos = {'R.MT1Y', 'R.MT5Y'}; 
+    rtoey_columns = find(ismember(filename.textdata, rtoey_pos));
+    for i = 1:size(filename.data, 1)
+        foot_pos.data(i, 3) =  0.5 * (mean(filename.data(i, rtoey_columns), 2) + mean(filename.data(i, rheely_columns), 2));
+    end
+
+    % Right Foot Z
+    rheelz_pos = {'R.Heel.TopZ', 'R.Heel.BottomZ', 'R.Heel.LateralZ'};
+    rheelz_columns = find(ismember(filename.textdata, rheelz_pos));
+    rtoez_pos = {'R.MT1Z', 'R.MT5Z'}; 
+    rtoez_columns = find(ismember(filename.textdata, rtoez_pos));
+    for i = 1:size(filename.data, 1)
+        foot_pos.data(i, 4) =  0.5 * (mean(filename.data(i, rtoez_columns), 2) + mean(filename.data(i, rheelz_columns), 2));
+    end
+    
+    % Left Foot X
+    lheelx_pos = {'L.Heel.TopX', 'L.Heel.BottomX', 'L.Heel.LateralX'};
+    lheelx_columns = find(ismember(filename.textdata, lheelx_pos));
+    ltoex_pos = {'L.MT1X', 'L.MT5X'}; 
+    ltoex_columns = find(ismember(filename.textdata, ltoex_pos));
+    for i = 1:size(filename.data, 1)
+        foot_pos.data(i, 5) =  0.5 * (mean(filename.data(i, ltoex_columns), 2) + mean(filename.data(i, lheelx_columns), 2));
+    end
+
+    % Left Foot Y
+    lheely_pos = {'L.Heel_TopY', 'L.Heel.BottomY', 'L.Heel.LateralY'};
+    lheely_columns = find(ismember(filename.textdata, lheely_pos));
+    ltoey_pos = {'L.MT1Y', 'L.MT5Y'}; 
+    ltoey_columns = find(ismember(filename.textdata, ltoey_pos));
+    for i = 1:size(filename.data, 1)
+        foot_pos.data(i, 6) =  0.5 * (mean(filename.data(i, ltoey_columns), 2) + mean(filename.data(i, lheely_columns), 2));
+    end
+
+    % Left Foot Z
+    lheelz_pos = {'L.Heel.TopZ', 'L.Heel.BottomZ', 'L.Heel.LateralZ'};
+    lheelz_columns = find(ismember(filename.textdata, lheelz_pos));
+    ltoez_pos = {'L.MT1Z', 'L.MT5Z'}; 
+    ltoez_columns = find(ismember(filename.textdata, ltoez_pos));
+    for i = 1:size(filename.data, 1)
+        foot_pos.data(i, 7) =  0.5 * (mean(filename.data(i, ltoez_columns), 2) + mean(filename.data(i, lheelz_columns), 2));
+    end
+    
+end
+
+% Step 7: Plot the data collected -  Coded by Khanh An Nguyen
+function [] = step_7(strides_list, strides_duration_list, strides_length_list, strides_avgspeed_list, pelvis_pos_list, foot_pos_list, labels_list)
+    
+    figure;                                                                 % Create a figure tab for the plots
+
+    % Part A
+    subplot(2,3,1);                                                         % Divides the figure into a 2-row by 3-column grid of subplots and activates the first subplot position
+    grid on;                                                                % Turns on the grid lines for the current subplot
+    hold on;                                                                % Allows multiple plots on the same axes
+    
+    % Loop through each dataset
+    for i = 1:length(strides_list)                                          % Repeat the procedure for 3 dataset of 2.5, 3.5 and 4.5 m/s
+        strides = strides_list{i};                                          % Store all the strides data under a variable
+        durations = strides_duration_list{i};                               % Store all the strides duration under a variable
+        x = 2:size(strides.data, 1);                                        % Let the horizontal axis values be the number of stride counts
+        y = durations(:);                                                   % Let the vertical axis values be the duration of strides
+        plot(x, y, 'DisplayName', labels_list{i});                          % Plot and add legends
+    end
+
+    xlabel('Stride Count');                                                 % Label the Horizontal Axis
+    ylabel('Stride Duration (s)');                                          % Label the Vertical Axis
+    title('Plot of Stride Duration vs. Stride Count');                      % Label the Plot Diagram Title
+    legend('show');                                                         % Display all legends
+    hold off;                                                               % Turn hold off to avoid overload failure
+    
+    % Repeat the Part A procedure for Part B and C on the 2nd and 3rd subplot position  
+
+    % Part B
+    subplot(2,3,2);
+    grid on;
+    hold on;
+
+    for i = 1:length(strides_list)
+        strides = strides_list{i};
+        lengths = strides_length_list{i};
+        x = 2:size(strides.data, 1 );
+        y = lengths(:);
+        plot(x,y, 'DisplayName', labels_list{i});
+    end
+
+    xlabel('Stride Count');
+    ylabel('Stride Length (m)');
+    title('Plot of Stride Length vs. Stride Count');
+    legend('show');
+    hold off;
+
+    % Part C
+    subplot(2,3,3);
+    grid on;
+    hold on;
+
+    for i = 1:length(strides_list)
+        strides = strides_list{i};
+        avgspeed = strides_avgspeed_list{i};
+        x = 2:size(strides.data, 1 );
+        y = avgspeed(:);
+        plot(x,y, 'DisplayName', labels_list{i});
+    end
+
+    xlabel('Stride Count');
+    ylabel('Average Stride Speed (m/s)');
+    title('Plot of Average Stride Speed vs. Stride Count');
+    legend('show');
+    hold off;
+
+    % Part D
+    subplot(2,3,4);                                                         % Same as Part A but on the fourth subplot position
+    grid on;
+    hold on;
+
+    for i = 1:length(pelvis_pos_list)                                       % Repeat the following step for every pelvis position recorded
+       strides = pelvis_pos_list{i};
+       % Normalized stride time = 100 * ( Determining Stride / Last Stride)
+       x = 100*strides.data(:,1)./strides.data(size(strides.data, 1), 1);   % Noramlize the stride time, store as horizontal axis values
+       y = strides.data(:,3);                                               % Let vertical axis values be pelvis postions
+       plot(x,y, 'DisplayName', labels_list{i});                            % Plot and add legends
+    end
+
+    xlabel('Normalized Stride Time (%)');                                   % Same as Part A
+    ylabel('Pelvis Vertical Position (m)');
+    title('Plot of Pelvis Veritical Postition vs. Normalized Stride Time');
+    legend('show');
+    hold off;
+    
+    % Part E
+    subplot(2,3,5);                                                         % Same as Part A but on the fifth subplot position
+    grid on;
+    hold on;
+
+    for i = 1:length(foot_pos_list)                                         % Repeat the following step for every left foot position recorded
+        data = foot_pos_list{i};
+        x = data.data(:,5);                                                 % The fifth column of the data is the X axis degree of left foot position
+        y = data.data(:,6);                                                 % The sixth column of the data is the Y axis degree of left foor position
+        plot(x,y, 'DisplayName', labels_list{i});                           % Plot and add legends
+    end
+
+    xlabel('Forwards-Backwards Positions (m)');                             % Same as Part A
+    ylabel('Vertical Positions (m)');
+    title('Plot of Mean Left Foot Vertical vs. Forwards-Backwards Postion');
+    legend('show');
+    hold off;
+    
+    % Repeat the Part E procedure for Part F on the sixth subplot position
+
+    % Part F
+    subplot(2,3,6);
+    grid on;
+    hold on;
+
+    for i = 1:length(foot_pos_list)
+        data = foot_pos_list{i};
+        x = data.data(:,2);
+        y = data.data(:,3);
+        plot(x,y, 'DisplayName', labels_list{i});
+    end
+
+    xlabel('Forwards-Backwards Positions (m)');
+    ylabel('Vertical Positions (m)');
+    title('Plot of Mean Right Foot Vertical vs. Forwards-Backwards Postion');
+    legend('show');
+    hold off;
+
+end
