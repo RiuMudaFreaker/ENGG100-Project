@@ -1,0 +1,9 @@
+close all; clear all; clc;
+[S25, S35, S45, strides25, strides35, strides45, d25, L25, v25, d35, L35, v35, d45, L45, v45, pelvisPos25, pelvisPos35, pelvisPos45, footPos25, footPos35, footPos45 ] = main();
+% S25 S35 S45 are full data files
+% strides25 strides35 strides45 are strides storage
+% d25 d35 d45 are strides duration
+% L25 L35 L45 are strides length
+% v25 v35 v45 are strides average speed
+% pelvisPos25 pelvisPos35 pelvisPos45 are Pelvis postions
+% footPos25 footPos35 footPos45 are foot positions
