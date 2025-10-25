@@ -43,6 +43,9 @@ function [S25, S35, S45, strides25, strides35, strides45, d25, L25, v25, d35, L3
     % Call step_7 function to generate required plots
     step_7({strides25, strides35, strides45}, {d25, d35, d45}, {L25, L35, L45}, {v25, v35, v45}, {pelvisPos25, pelvisPos35, pelvisPos45}, {footPos25, footPos35, footPos45}, {'2.5 m/s', '3.5 m/s', '4.5 m/s'});
 
+    % Step 8: Save output as a Graphics File
+    print(gcf, 'ENGG100 Plots', '-dpng', '-r300');
+
 end
 
 % Step 2: Store the data into Matlab - Coded by Khanh An Nguyen
